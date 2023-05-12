@@ -1,60 +1,64 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 
-// Define the IPv6 address of PCB:
-#define DEST_ADDR "2001:2::2"
-// Define the port number to receive packets on:
-#define PORT_NUM 12345
+#define BUF_SIZE 1024
 
-int main() {
-  // Create a socket to receive IPv6 packets:
-  int sockfd = socket(AF_INET6, SOCK_DGRAM, 0);
-  if (sockfd < 0) {
-      perror("socket");
-      exit(1);
-  }
+int main(int argc, char *argv[]) {
+    int sockfd, optval = 1;
+    struct sockaddr_in server_addr, client_addr;
+    struct sockaddr_in6 client_addr6;
+    socklen_t addrlen = sizeof(client_addr);
+    socklen_t addrlen6 = sizeof(client_addr6);
+    char buffer[BUF_SIZE];
 
-  // Bind the socket to the IPv6 address of PCB and the port number:
-  struct sockaddr_in6 src_addr;
-  memset(&src_addr, 0, sizeof(src_addr));
-  src_addr.sin6_family = AF_INET6;
-  src_addr.sin6_addr = in6addr_any;
-  src_addr.sin6_port = htons(PORT_NUM);
-  if (bind(sockfd, (struct sockaddr*)&src_addr, sizeof(src_addr)) < 0) {
-      perror("bind");
-      exit(1);
-  }
+    // Create socket
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        perror("socket creation failed");
+        exit(EXIT_FAILURE);
+    }
 
-  // Set the destination IPv6 address:
-  struct sockaddr_in6 dest_addr;
-  memset(&dest_addr, 0, sizeof(dest_addr));
-  dest_addr.sin6_family = AF_INET6;
-  dest_addr.sin6_port = htons(0);
-  if (inet_pton(AF_INET6, DEST_ADDR, &dest_addr.sin6_addr) != 1) {
-      fprintf(stderr, "Invalid address\n");
-      exit(1);
-  }
+    // Set socket option to reuse address and port
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &optval, sizeof(optval))) {
+        perror("setsockopt failed");
+        exit(EXIT_FAILURE);
+    }
 
-  // Wait for a packet to arrive:
-  char buffer[1024];
-  struct sockaddr_in6 sender_addr;
-  socklen_t sender_addrlen = sizeof(sender_addr);
-  int num_bytes = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr*)&sender_addr, &sender_addrlen);
-  if (num_bytes < 0) {
-      perror("recvfrom");
-      exit(1);
-  }
+    // Bind socket to local address and port
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_addr.sin_port = htons(5000);
 
-  // Print the received message:
-  printf("Received message from PCA: %s\n", buffer);
+    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("bind failed");
+        exit(EXIT_FAILURE);
+    }
 
-  // Close the socket:
-  close(sockfd);
+    printf("PCB is ready to receive IPv6 traffic from PCA\n");
 
-  return 0;
+    // Receive data from socket
+    while (1) {
+        int n = recvfrom(sockfd, buffer, BUF_SIZE, 0, (struct sockaddr *)&client_addr6, &addrlen6);
+        if (n < 0) {
+            perror("recvfrom failed");
+            exit(EXIT_FAILURE);
+        }
+
+        // Print the received data
+        printf("PCB received %d bytes from %s: ", n, inet_ntoa(client_addr.sin_addr));
+        for (int i = 0; i < n; i++) {
+            printf("%02X ", (unsigned char)buffer[i]);
+        }
+        printf("\n");
+    }
+
+    close(sockfd);
+    return 0;
 }
